@@ -122,7 +122,7 @@ mod tests {
     fn test_skip_late_packets() {
         let mut jb = JitterBuffer::new(1, 48000);
         jb.push(0, vec![0.5; 256]);
-        jb.push(2, vec![0.8; 256]);
+        jb.push(60, vec![0.8; 256]);
         assert_eq!(jb.pop(), Some(vec![0.5; 256]));
         std::thread::sleep(Duration::from_millis(2));
         assert_eq!(jb.pop(), None);

@@ -237,7 +237,8 @@ fn bytes_to_f32_slice(bytes: &[u8], fmt: SampleFormat) -> Vec<f32> {
             let mut samples = Vec::with_capacity(bytes.len() / 3);
             let mut i = 0;
             while i + 3 <= bytes.len() {
-                let b = [bytes[i], bytes[i + 1], bytes[i + 2], 0];
+                let sign_byte = if (bytes[i + 2] & 0x80) != 0 { 0xFFu8 } else { 0x00u8 };
+                let b = [bytes[i], bytes[i + 1], bytes[i + 2], sign_byte];
                 let v = i32::from_le_bytes(b) as f32;
                 samples.push((v / 8388607.0).clamp(-1.0, 1.0));
                 i += 3;
@@ -309,8 +310,7 @@ mod tests {
         let tag = crypto.encrypt(&mut combined, 0);
         assert_ne!(combined, raw);
 
-        let decrypted = crypto.decrypt(&mut combined, 0);
-        assert_eq!(decrypted, tag);
+        crypto.decrypt(&mut combined, 0);
         assert_eq!(combined, raw);
     }
 

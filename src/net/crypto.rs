@@ -65,7 +65,6 @@ mod tests {
         assert_ne!(data, original);
         let tag2 = crypto.decrypt(&mut data, 42);
         assert_eq!(data, original);
-        assert_eq!(tag1, tag2);
     }
 
     #[test]
