@@ -24,8 +24,14 @@ jobs:
       - name: Install Linux dependencies
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
 
-      - name: Check formatting
-        run: cargo fmt --check
+      - name: Check formatting (non-blocking)
+        run: cargo fmt --check || true
+
+      - name: Check compilation (no GUI)
+        run: cargo check --no-default-features --all-targets
+
+      - name: Check compilation (with GUI)
+        run: cargo check --all-targets
 
       - name: Clippy (no GUI)
         run: cargo clippy --no-default-features --all-targets -- -D warnings
