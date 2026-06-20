@@ -4,13 +4,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use clap::{Parser, Subcommand};
 use anyhow::Result;
 
-mod audio;
-mod client;
-mod config;
+use rj45_sound_card::{audio, client, config, net, server};
 #[cfg(feature = "gui")]
-mod gui;
-mod net;
-mod server;
+use rj45_sound_card::gui;
 
 #[derive(Parser)]
 #[command(name = "rjsc")]
@@ -28,6 +24,10 @@ enum Commands {
         /// Path to configuration file
         #[arg(short, long, default_value = "rjsc.toml")]
         config: String,
+
+        /// Run as a daemon (no terminal)
+        #[arg(long)]
+        daemon: bool,
     },
 
     /// Run in CLIENT mode: use audio devices from a remote server
@@ -39,6 +39,10 @@ enum Commands {
         /// Server address (ip:port). Auto-discovers if not specified.
         #[arg(short, long)]
         server: Option<String>,
+
+        /// Run as a daemon (no terminal)
+        #[arg(long)]
+        daemon: bool,
     },
 
     /// List all available audio devices on this machine
@@ -75,7 +79,7 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Serve { config } => {
+        Commands::Serve { config, daemon } => {
             let settings = config::load(&config)?;
             let stop_flag = Arc::new(AtomicBool::new(false));
             let sf = stop_flag.clone();
@@ -83,12 +87,15 @@ async fn main() -> Result<()> {
                 tokio::signal::ctrl_c().await.ok();
                 sf.store(true, Ordering::SeqCst);
             });
+            if daemon {
+                log::info!("Starting server in daemon mode");
+            }
             if let Err(e) = server::run(settings, stop_flag).await {
                 log::error!("Server error: {}", e);
                 return Err(e);
             }
         }
-        Commands::Connect { config, server } => {
+        Commands::Connect { config, server, daemon } => {
             let settings = config::load(&config)?;
             let stop_flag = Arc::new(AtomicBool::new(false));
             let sf = stop_flag.clone();
@@ -96,6 +103,9 @@ async fn main() -> Result<()> {
                 tokio::signal::ctrl_c().await.ok();
                 sf.store(true, Ordering::SeqCst);
             });
+            if daemon {
+                log::info!("Starting client in daemon mode");
+            }
             if let Err(e) = client::run(settings, server, stop_flag).await {
                 log::error!("Client error: {}", e);
                 return Err(e);

@@ -29,9 +29,15 @@ making the remote sound card accessible as if it were local.
   (MOTU, RME, Focusrite, Universal Audio, Presonus, etc.)
 - **Bidirectional**: server → client audio AND client → server audio
 - **Low latency**: UDP streaming with configurable buffers (64–1024 frames)
+- **Jitter buffer**: packet reordering and jitter compensation for smooth playback
+- **Encryption**: optional pre-shared key encryption and authentication
+- **Integer PCM**: f32, i16, i24, i32 sample formats with automatic conversion
 - **Auto-discovery**: the client automatically finds servers on the network
+- **Auto-detect virtual device**: finds Loopback, BlackHole, or VB-Cable automatically
 - **Remote control**: volume, device selection, status
 - **Multi-channel**: supports 1 to 64+ channels depending on configuration
+- **Multi-client**: server supports multiple simultaneous client connections
+- **Daemon mode**: run as a background service with `--daemon` flag or systemd
 
 ## Installation
 

@@ -43,7 +43,7 @@ GUI thread (separate, eframe)
     └── client event loop (same runtime)
 ```
 
-Audio data flows through `crossbeam` bounded channels (capacity 32) between the audio thread (cpal callbacks) and the network thread (tokio async tasks).
+Audio data flows through `crossbeam` bounded channels (capacity 32) between the audio thread (cpal callbacks) and the network thread (tokio async tasks). The client also maintains a jitter buffer for reordering and smoothing incoming UDP audio packets.
 
 ## Audio Pipeline
 
@@ -87,7 +87,13 @@ UdpSocket::send_to()  ─────  network  ─────►  UdpSocket::r
 | 35 | 1 | _reserved | Padding |
 | 36 | 4 | data_len | Bytes of audio data following header |
 
-The audio data follows immediately: `frame_count * channels * 4` bytes of little-endian f32 PCM.
+The audio data follows immediately: `frame_count * channels * sample_bytes` of little-endian PCM (see `sample_format`).
+
+When encryption is enabled, a 4-byte CRC32 authentication tag is appended to the packet:
+
+```
+header_bytes + encrypted_audio + auth_tag_le_bytes
+```
 
 ## Control Protocol (TCP 42002)
 
@@ -108,6 +114,9 @@ JSON messages, each prefixed by a 4-byte little-endian length field.
 | `error` | Server → Client | `message: string` |
 | `ping` | Client → Server | (none) |
 | `pong` | Server → Client | (none) |
+| `auth` | Server → Client | `challenge: hex string` |
+| `auth_response` | Client → Server | `response: hex string` |
+| `auth_ok` | Server → Client | (none) |
 
 ### DeviceInfo
 
@@ -161,9 +170,27 @@ The server broadcasts a JSON payload to `255.255.255.255:42000` every 3 seconds:
 
 The client listens on `0.0.0.0:42000` for the configured timeout (default 5s) and collects all unique servers (deduplicated by socket address).
 
+## Jitter Buffer
+
+The client maintains a jitter buffer for incoming UDP audio packets to handle network jitter, packet reordering, and packet loss:
+
+- Implemented as a `BTreeMap` keyed by sequence number, ensuring packets are played in order regardless of arrival order.
+- **Configurable max latency** — defaults to 50 ms (`jitter_buffer_latency_ms` in config). Packets older than this threshold are dropped.
+- **Duplicate removal** — if a packet with a sequence number already buffered arrives, it is silently discarded.
+- **Gap skipping** — when a sequence gap is detected and the next expected packet hasn't arrived within the latency window, playback advances past the gap (silence is inserted).
+
+## Encryption
+
+Optional pre-shared key (PSK) encryption is available for both audio and control traffic:
+
+- **Audio encryption**: XOR-based stream cipher using per-packet key derivation via [SipHash](https://en.wikipedia.org/wiki/SipHash). The SipHash of the 40-byte header (excluding magic) produces a unique key for each packet.
+- **Authentication tag**: A 4-byte CRC32 checksum of the plaintext audio data is appended after the encrypted audio payload, allowing the receiver to verify integrity.
+- **Control connection**: Challenge-response authentication over TCP. The server sends a random challenge (`auth` message), the client responds with a SipHash-based hash of (challenge + PSK) (`auth_response`), and the server replies with `auth_ok` on success.
+- Configured via the `[encryption]` section in `rjsc.toml` (see below).
+
 ## Configuration System
 
-Configuration is loaded from a TOML file (`rjsc.toml` by default). If the file doesn't exist, hardcoded defaults are used. The `Settings` struct is deserialized via `serde` + `toml`.
+Configuration is loaded from a TOML file (`rjsc.toml` by default). If the file doesn't exist, hardcoded defaults are used. The `Settings` struct is deserialized via `serde` + `toml`. The `[encryption]` section allows setting a pre-shared key and toggling encryption on/off.
 
 See [docs/config.md](docs/config.md) for the full reference.
 
@@ -180,6 +207,10 @@ See [docs/config.md](docs/config.md) for the full reference.
 | `eframe`/`egui` | Optional GUI control panel |
 | `anyhow` | Error handling |
 | `log`/`env_logger` | Structured logging |
+| `siphasher` | SipHash for per-packet key derivation |
+| `hex` | Hex encoding/decoding for keys |
+| `crc32fast` | CRC32 checksums for auth tags |
+| `fastrand` | Fast random number generation for challenges |
 
 ## Build and Packaging
 
@@ -202,9 +233,5 @@ See [docs/config.md](docs/config.md) for the full reference.
 
 ## Limitations
 
-- Single active audio stream at a time (one client's UDP packets are processed)
-- No encryption or authentication
-- No jitter buffer or packet loss recovery (UDP is fire-and-forget)
-- Virtual device name must be configured manually per platform
+- Virtual device name must be configured (auto-detection is attempted but may require manual fallback)
 - Server binds to a single network interface (`bind_address`)
-- Audio format is always 32-bit float (no integer PCM support for streaming)

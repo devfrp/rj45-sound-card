@@ -7,6 +7,18 @@ pub const DEFAULT_CONTROL_PORT: u16 = 42002;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ControlMessage {
+    #[serde(rename = "auth")]
+    Auth { challenge: String },
+
+    #[serde(rename = "auth_response")]
+    AuthResponse { hash: String },
+
+    #[serde(rename = "auth_ok")]
+    AuthOk,
+
+    #[serde(rename = "auth_required")]
+    AuthRequired,
+
     #[serde(rename = "list_devices")]
     ListDevices,
 
@@ -83,6 +95,9 @@ pub async fn recv_control(
     let mut len_buf = [0u8; 4];
     stream.read_exact(&mut len_buf).await?;
     let len = u32::from_le_bytes(len_buf) as usize;
+    if len > 65536 {
+        anyhow::bail!("Control message too large: {} bytes", len);
+    }
     let mut data = vec![0u8; len];
     stream.read_exact(&mut data).await?;
     let msg: ControlMessage = serde_json::from_slice(&data)?;
@@ -96,4 +111,12 @@ pub async fn run_control_server(
     let port = listener.local_addr()?.port();
     log::info!("Control server listening on {}", addr);
     Ok((listener, port))
+}
+
+pub fn compute_auth_response(challenge: &str, pre_shared_key_hex: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = siphasher::sip::SipHasher::new_with_keys(0, 0);
+    challenge.hash(&mut hasher);
+    pre_shared_key_hex.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
 }

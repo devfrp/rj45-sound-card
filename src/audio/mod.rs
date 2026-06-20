@@ -1,6 +1,9 @@
 pub mod capture;
 pub mod format;
+pub mod jitter;
 pub mod playback;
+pub mod virtual_device;
+pub mod virtual_device;
 
 use anyhow::Result;
 use cpal::traits::{DeviceTrait, HostTrait};

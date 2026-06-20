@@ -1,0 +1,142 @@
+use std::collections::BTreeMap;
+use std::time::{Duration, Instant};
+
+pub struct JitterBuffer {
+    packets: BTreeMap<u64, Vec<f32>>,
+    max_latency: Duration,
+    next_sequence: u64,
+    sample_rate: u32,
+    channels: u16,
+    last_output: Option<Instant>,
+}
+
+impl JitterBuffer {
+    pub fn new(max_latency_ms: u64, sample_rate: u32, channels: u16) -> Self {
+        Self {
+            packets: BTreeMap::new(),
+            max_latency: Duration::from_millis(max_latency_ms),
+            next_sequence: 0,
+            sample_rate,
+            channels,
+            last_output: None,
+        }
+    }
+
+    pub fn push(&mut self, sequence: u64, samples: Vec<f32>) {
+        if sequence < self.next_sequence {
+            return;
+        }
+        self.packets.insert(sequence, samples);
+
+        let max_seq = self.next_sequence
+            + ((self.max_latency.as_secs_f64() * self.sample_rate as f64) as u64);
+        while self.packets.len() > 1 {
+            let last_key = *self.packets.last_key_value().unwrap().0;
+            if last_key <= max_seq {
+                break;
+            }
+            self.packets.pop_last();
+        }
+    }
+
+    pub fn pop(&mut self) -> Option<Vec<f32>> {
+        let now = Instant::now();
+
+        if let Some(last_out) = self.last_output {
+            let frame_duration = Duration::from_secs_f64(1.0 / self.sample_rate as f64);
+            let expected_frames = (now - last_out).as_secs_f64() * self.sample_rate as f64;
+            if expected_frames < 0.5 {
+                return None;
+            }
+        }
+
+        if let Some((&seq, _)) = self.packets.first_key_value() {
+            if seq == self.next_sequence {
+                let samples = self.packets.remove(&seq).unwrap();
+                self.next_sequence = seq.wrapping_add(1);
+                self.last_output = Some(now);
+                return Some(samples);
+            }
+            if seq < self.next_sequence {
+                self.packets.pop_first();
+                return None;
+            }
+        }
+
+        if let Some(first_seq) = self.packets.first_key_value().map(|(k, _)| *k) {
+            let gap = first_seq.wrapping_sub(self.next_sequence);
+            let gap_duration = Duration::from_secs_f64(
+                gap as f64 / self.sample_rate as f64,
+            );
+            if gap_duration > self.max_latency {
+                log::debug!(
+                    "Jitter buffer: skipping {} missing packets (seq {} -> {})",
+                    gap,
+                    self.next_sequence,
+                    first_seq
+                );
+                self.next_sequence = first_seq;
+            }
+        }
+
+        None
+    }
+
+    pub fn drain_available(&mut self) -> Vec<Vec<f32>> {
+        let mut result = Vec::new();
+        while let Some(samples) = self.pop() {
+            result.push(samples);
+        }
+        result
+    }
+
+    pub fn len(&self) -> usize {
+        self.packets.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.packets.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_in_order_delivery() {
+        let mut jb = JitterBuffer::new(50, 48000, 2);
+        let samples = vec![0.5f32; 512];
+        jb.push(0, samples.clone());
+        assert_eq!(jb.pop(), Some(samples));
+    }
+
+    #[test]
+    fn test_reordering() {
+        let mut jb = JitterBuffer::new(50, 48000, 2);
+        jb.push(1, vec![1.0; 256]);
+        jb.push(0, vec![0.5; 256]);
+        assert_eq!(jb.pop(), Some(vec![0.5; 256]));
+        assert_eq!(jb.pop(), Some(vec![1.0; 256]));
+    }
+
+    #[test]
+    fn test_skip_late_packets() {
+        let mut jb = JitterBuffer::new(1, 48000, 2);
+        jb.push(0, vec![0.5; 256]);
+        jb.push(2, vec![0.8; 256]);
+        assert_eq!(jb.pop(), Some(vec![0.5; 256]));
+        std::thread::sleep(Duration::from_millis(2));
+        assert_eq!(jb.pop(), None);
+        assert_eq!(jb.pop(), Some(vec![0.8; 256]));
+    }
+
+    #[test]
+    fn test_discard_old_duplicates() {
+        let mut jb = JitterBuffer::new(50, 48000, 2);
+        jb.push(0, vec![0.5; 256]);
+        assert_eq!(jb.pop(), Some(vec![0.5; 256]));
+        jb.push(0, vec![1.0; 256]);
+        assert!(jb.is_empty());
+    }
+}

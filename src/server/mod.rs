@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -5,13 +7,22 @@ use anyhow::Result;
 use crossbeam::channel;
 use cpal::traits::DeviceTrait;
 use tokio::io::BufReader;
+use tokio::sync::RwLock;
 
 use crate::audio::capture::AudioCapture;
+use crate::audio::format::SampleFormat;
 use crate::audio::playback::AudioPlayback;
 use crate::config::Settings;
 use crate::net::audio_stream::{self, AudioPacketHeader};
 use crate::net::control::{self, ControlMessage, DeviceInfo};
+use crate::net::crypto::PacketCrypto;
 use crate::net::discovery;
+
+struct ClientStream {
+    stream_id: u32,
+    sequence: u64,
+    addr: SocketAddr,
+}
 
 pub async fn run(settings: Settings, stop_flag: Arc<AtomicBool>) -> Result<()> {
     let hostname = std::env::var("HOSTNAME")
@@ -37,28 +48,31 @@ pub async fn run(settings: Settings, stop_flag: Arc<AtomicBool>) -> Result<()> {
 
     let audio_format = settings.audio_format();
     log::info!(
-        "Audio format: {} channels @ {} Hz, buffer: {} frames",
+        "Audio format: {} channels @ {} Hz, buffer: {} frames, {:?}",
         audio_format.channels,
         audio_format.sample_rate,
-        audio_format.buffer_frames
+        audio_format.buffer_frames,
+        audio_format.sample_format,
     );
     log::info!(
         "Estimated bandwidth: {:.1} Mbps",
         audio_format.bitrate_mbps()
     );
 
-    // Audio capture
+    let crypto = settings.encryption_key();
+    if crypto.is_some() {
+        log::info!("Encryption enabled (pre-shared key)");
+    }
+
     let capture = AudioCapture::new(&input_device, &audio_format)?;
     capture.start()?;
     let capture_rx = capture.receiver();
     let actual_format = *capture.format();
 
-    // Audio playback
     let playback = AudioPlayback::new(&output_device, &actual_format)?;
     playback.start()?;
     let playback_tx = playback.sender();
 
-    // Bind UDP audio socket
     let audio_socket = Arc::new(
         tokio::net::UdpSocket::bind(format!(
             "{}:{}",
@@ -69,8 +83,6 @@ pub async fn run(settings: Settings, stop_flag: Arc<AtomicBool>) -> Result<()> {
     );
     let audio_port = audio_socket.local_addr()?.port();
 
-    // Bind TCP control listener
-    let audio_port_for_clients = audio_port;
     let (control_listener, control_port) =
         control::run_control_server(&format!(
             "{}:{}",
@@ -79,79 +91,86 @@ pub async fn run(settings: Settings, stop_flag: Arc<AtomicBool>) -> Result<()> {
         ))
         .await?;
 
-    // Start discovery broadcast
     let device_name = input_device.name().unwrap_or_else(|_| "Unknown".to_string());
-    let dn_for_discovery = device_name.clone();
+    let dn = device_name.clone();
     let hn = hostname.clone();
     let ch = audio_format.channels;
     tokio::spawn(async move {
         if let Err(e) = discovery::announce_server(
-            &hn, &dn_for_discovery, ch, audio_port, control_port,
+            &hn, &dn, ch, audio_port, control_port,
         ).await {
             log::error!("Discovery broadcast failed: {}", e);
         }
     });
 
-    // Shared state
     let connected_clients = Arc::new(AtomicU32::new(0));
     let next_stream_id = Arc::new(AtomicU32::new(1));
-    let current_stream_id = Arc::new(AtomicU32::new(0));
-    let audio_sequence = Arc::new(AtomicU64::new(0));
-    let current_client_addrs: Arc<tokio::sync::RwLock<Vec<std::net::SocketAddr>>> =
-        Arc::new(tokio::sync::RwLock::new(Vec::new()));
-    let client_audio_port = audio_port_for_clients;
+    let current_client_addrs: Arc<RwLock<Vec<SocketAddr>>> =
+        Arc::new(RwLock::new(Vec::new()));
+    let client_streams: Arc<RwLock<HashMap<SocketAddr, ClientStream>>> =
+        Arc::new(RwLock::new(HashMap::new()));
+    let volumes: Arc<RwLock<Vec<f32>>> =
+        Arc::new(RwLock::new(vec![1.0; audio_format.channels as usize]));
 
-    // Build audio destination from client IP + audio port
-    fn audio_addr_for(client: std::net::SocketAddr, port: u16) -> std::net::SocketAddr {
-        std::net::SocketAddr::new(client.ip(), port)
-    }
-
-    // Per-channel volume multipliers (shared between control handler and audio sender)
-    let volumes: Arc<tokio::sync::RwLock<Vec<f32>>> =
-        Arc::new(tokio::sync::RwLock::new(vec![1.0; audio_format.channels as usize]));
-
-    // Audio capture -> network task
     let audio_socket_clone = audio_socket.clone();
     let client_addrs = current_client_addrs.clone();
-    let sid = current_stream_id.clone();
-    let seq = audio_sequence.clone();
+    let streams = client_streams.clone();
     let fmt_ch = audio_format.channels;
     let fmt_sr = audio_format.sample_rate;
     let fmt_bf = audio_format.buffer_frames as u32;
+    let fmt_sfmt = audio_format.sample_format;
     let vols = volumes.clone();
+    let crypto_cap = crypto.clone();
     tokio::spawn(async move {
         loop {
             match capture_rx.recv() {
                 Ok(mut samples) => {
                     let addr_guard = client_addrs.read().await;
-                    if !addr_guard.is_empty() {
-                        // Apply per-channel volume
-                        let vol_guard = vols.read().await;
-                        for (i, sample) in samples.iter_mut().enumerate() {
-                            let ch_idx = i % fmt_ch as usize;
-                            *sample *= vol_guard[ch_idx];
-                        }
-                        drop(vol_guard);
+                    if addr_guard.is_empty() {
+                        continue;
+                    }
 
-                        let s = seq.fetch_add(1, Ordering::SeqCst);
+                    let vol_guard = vols.read().await;
+                    for (i, sample) in samples.iter_mut().enumerate() {
+                        let ch_idx = i % fmt_ch as usize;
+                        *sample *= vol_guard[ch_idx];
+                    }
+                    drop(vol_guard);
+
+                    let mut stream_guard = streams.write().await;
+                    for addr in addr_guard.iter() {
+                        let entry = stream_guard
+                            .entry(*addr)
+                            .or_insert_with(|| ClientStream {
+                                stream_id: 0,
+                                sequence: 0,
+                                addr: *addr,
+                            });
+                        let seq = entry.sequence;
+                        entry.sequence = entry.sequence.wrapping_add(1);
+
                         let header = AudioPacketHeader::new(
-                            sid.load(Ordering::SeqCst),
-                            s,
+                            entry.stream_id,
+                            seq,
                             fmt_ch,
                             fmt_sr,
+                            fmt_sfmt,
                             fmt_bf,
                         );
-                        for addr in addr_guard.iter() {
-                            if let Err(e) = audio_stream::send_audio_packet(
-                                &audio_socket_clone,
-                                addr,
-                                &header,
-                                &samples,
-                            ).await {
-                                log::warn!("Failed to send audio to {}: {}", addr, e);
-                            }
+
+                        let audio_addr = std::net::SocketAddr::new(addr.ip(), audio_port);
+
+                        if let Err(e) = audio_stream::send_audio_packet(
+                            &audio_socket_clone,
+                            &audio_addr,
+                            &header,
+                            &samples,
+                            crypto_cap.as_ref(),
+                        ).await {
+                            log::warn!("Failed to send audio to {}: {}", addr, e);
                         }
                     }
+                    drop(stream_guard);
                 }
                 Err(channel::RecvError) => {
                     log::error!("Capture channel closed");
@@ -161,9 +180,9 @@ pub async fn run(settings: Settings, stop_flag: Arc<AtomicBool>) -> Result<()> {
         }
     });
 
-    // Network -> audio playback task
     let audio_socket_clone2 = audio_socket.clone();
     let client_addr_filter = current_client_addrs.clone();
+    let crypto_playback = crypto.clone();
     tokio::spawn(async move {
         let mut buf = vec![0u8; audio_stream::MAX_PACKET_SIZE];
         loop {
@@ -175,7 +194,10 @@ pub async fn run(settings: Settings, stop_flag: Arc<AtomicBool>) -> Result<()> {
                     if !allowed {
                         continue;
                     }
-                    if let Some((_header, samples)) = audio_stream::parse_audio_packet(&buf[..len]) {
+                    if let Some((_header, samples)) = audio_stream::parse_audio_packet_decrypt(
+                        &buf[..len],
+                        crypto_playback.as_ref(),
+                    ) {
                         if let Err(e) = playback_tx.try_send(samples) {
                             if !e.is_disconnected() {
                                 log::warn!("Playback buffer full, dropping frame");
@@ -194,7 +216,6 @@ pub async fn run(settings: Settings, stop_flag: Arc<AtomicBool>) -> Result<()> {
         }
     });
 
-    // Accept client connections
     log::info!("Waiting for client connections on port {}...", control_port);
 
     loop {
@@ -208,13 +229,14 @@ pub async fn run(settings: Settings, stop_flag: Arc<AtomicBool>) -> Result<()> {
         let connected = connected_clients.clone();
         let max_clients = settings.server.max_clients;
         let current_addr = current_client_addrs.clone();
-        let audio_port = client_audio_port;
         let audio_fmt = actual_format;
         let device_name_str = device_name.clone();
         let sid_counter = next_stream_id.clone();
-        let cur_sid = current_stream_id.clone();
-        let seq_ctr = audio_sequence.clone();
+        let streams = client_streams.clone();
         let vols = volumes.clone();
+        let crypto_auth = crypto.clone();
+        let enc_enabled = settings.encryption.enabled;
+        let psk = settings.encryption.pre_shared_key.clone();
 
         tokio::spawn(async move {
             if connected.load(Ordering::SeqCst) >= max_clients {
@@ -225,6 +247,45 @@ pub async fn run(settings: Settings, stop_flag: Arc<AtomicBool>) -> Result<()> {
 
             let (mut read_half, mut write_half) = tokio::io::split(tcp_stream);
             let mut reader = BufReader::new(&mut read_half);
+
+            if enc_enabled && !psk.is_empty() {
+                let challenge = format!("{:016x}", fastrand::u64(..));
+                if let Err(e) = control::send_control(
+                    &mut write_half,
+                    &ControlMessage::Auth { challenge: challenge.clone() },
+                ).await {
+                    log::error!("Failed to send auth challenge: {}", e);
+                    connected.fetch_sub(1, Ordering::SeqCst);
+                    return;
+                }
+
+                match control::recv_control(&mut reader).await {
+                    Ok(ControlMessage::AuthResponse { hash }) => {
+                        let expected = control::compute_auth_response(&challenge, &psk);
+                        if hash != expected {
+                            log::warn!("Auth failed for {}", client_addr);
+                            let _ = control::send_control(
+                                &mut write_half,
+                                &ControlMessage::Error {
+                                    message: "Authentication failed".to_string(),
+                                },
+                            ).await;
+                            connected.fetch_sub(1, Ordering::SeqCst);
+                            return;
+                        }
+                        let _ = control::send_control(
+                            &mut write_half,
+                            &ControlMessage::AuthOk,
+                        ).await;
+                        log::info!("Client {} authenticated", client_addr);
+                    }
+                    Ok(_) | Err(_) => {
+                        log::warn!("Auth failed for {} (invalid response)", client_addr);
+                        connected.fetch_sub(1, Ordering::SeqCst);
+                        return;
+                    }
+                }
+            }
 
             loop {
                 match control::recv_control(&mut reader).await {
@@ -248,14 +309,22 @@ pub async fn run(settings: Settings, stop_flag: Arc<AtomicBool>) -> Result<()> {
                             }
                             ControlMessage::SelectDevice { channels, sample_rate, .. } => {
                                 let sid = sid_counter.fetch_add(1, Ordering::SeqCst);
-                                cur_sid.store(sid, Ordering::SeqCst);
-                                seq_ctr.store(0, Ordering::SeqCst);
-                                let new_addr = audio_addr_for(client_addr, audio_port);
+                                let new_addr = std::net::SocketAddr::new(client_addr.ip(), 0);
                                 {
-                                    let mut addrs = current_addr.write().await;
-                                    if !addrs.iter().any(|a| a == &new_addr) {
-                                        addrs.push(new_addr);
-                                    }
+                                    let mut stream_map = streams.write().await;
+                                    stream_map.insert(
+                                        new_addr,
+                                        ClientStream {
+                                            stream_id: sid,
+                                            sequence: 0,
+                                            addr: new_addr,
+                                        },
+                                    );
+                                }
+                                let mut addrs = current_addr.write().await;
+                                let audio_addr = std::net::SocketAddr::new(client_addr.ip(), 0);
+                                if !addrs.iter().any(|a| a.ip() == client_addr.ip()) {
+                                    addrs.push(audio_addr);
                                 }
                                 if let Err(e) = control::send_control(
                                     &mut write_half,
@@ -328,6 +397,8 @@ pub async fn run(settings: Settings, stop_flag: Arc<AtomicBool>) -> Result<()> {
 
             connected.fetch_sub(1, Ordering::SeqCst);
             current_addr.write().await.retain(|a| a.ip() != client_addr.ip());
+            let cleanup_addr = std::net::SocketAddr::new(client_addr.ip(), 0);
+            streams.write().await.remove(&cleanup_addr);
             log::info!("Client {} removed", client_addr);
         });
     }

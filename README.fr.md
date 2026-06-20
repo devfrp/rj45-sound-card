@@ -28,6 +28,12 @@ rendant la carte son distante accessible comme si elle était locale.
 - **Toutes cartes son** : compatible avec tout périphérique audio reconnu par l'OS
   (MOTU, RME, Focusrite, Universal Audio, Presonus, etc.)
 - **Bidirectionnel** : audio du serveur → client ET audio du client → serveur
+- **Jitter buffer** : réordonnancement et compensation de gigue pour une lecture fluide
+- **Chiffrement** : chiffrement par clé pré-partagée et authentification (optionnel)
+- **PCM entier** : formats f32, i16, i24, i32 avec conversion automatique
+- **Auto-détection** : détection automatique du périphérique virtuel (Loopback, BlackHole, VB-Cable)
+- **Multi-client** : le serveur accepte plusieurs connexions simultanées
+- **Mode daemon** : exécution en arrière-plan avec `--daemon` ou via systemd
 - **Faible latence** : streaming UDP avec buffers configurables (64–1024 frames)
 - **Auto-découverte** : le client trouve automatiquement les serveurs sur le réseau
 - **Contrôle à distance** : volume, sélection de périphérique, statut

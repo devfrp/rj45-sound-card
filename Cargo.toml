@@ -1,6 +1,6 @@
 [package]
 name = "rj45-sound-card"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
 description = "Network audio bridge - share any sound card over Ethernet/RJ45 across Windows, Linux, and macOS"
 authors = ["RJ45 Sound Card Team"]
@@ -27,3 +27,7 @@ env_logger = "0.11"
 anyhow = "1"
 crossbeam = "0.8"
 eframe = { version = "0.34", optional = true }
+hex = "0.4"
+crc32fast = "1"
+fastrand = "2"
+siphasher = "1"
