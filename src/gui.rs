@@ -598,11 +598,6 @@ async fn backend_loop(
                     }
                 }
             }
-            Ok(GuiCommand::Ping) => {
-                if let Some(ref mut stream) = client_stream {
-                    let _ = control::send_control(stream, &ControlMessage::Ping).await;
-                }
-            }
             Err(channel::RecvError) => break,
         }
     }
