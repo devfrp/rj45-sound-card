@@ -245,7 +245,6 @@ async fn read_msg_loop(
     let jitter_buffer = Arc::new(Mutex::new(JitterBuffer::new(
         settings.client.jitter_buffer_ms,
         sample_rate,
-        channels,
     )));
     let rx_sock = UdpSocket::bind(format!("0.0.0.0:{}", settings.network.audio_port)).await?;
     let rx_tx = playback_tx.clone();

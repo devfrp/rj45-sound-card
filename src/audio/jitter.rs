@@ -6,18 +6,16 @@ pub struct JitterBuffer {
     max_latency: Duration,
     next_sequence: u64,
     sample_rate: u32,
-    channels: u16,
     last_output: Option<Instant>,
 }
 
 impl JitterBuffer {
-    pub fn new(max_latency_ms: u64, sample_rate: u32, channels: u16) -> Self {
+    pub fn new(max_latency_ms: u64, sample_rate: u32) -> Self {
         Self {
             packets: BTreeMap::new(),
             max_latency: Duration::from_millis(max_latency_ms),
             next_sequence: 0,
             sample_rate,
-            channels,
             last_output: None,
         }
     }
@@ -105,7 +103,7 @@ mod tests {
 
     #[test]
     fn test_in_order_delivery() {
-        let mut jb = JitterBuffer::new(50, 48000, 2);
+        let mut jb = JitterBuffer::new(50, 48000);
         let samples = vec![0.5f32; 512];
         jb.push(0, samples.clone());
         assert_eq!(jb.pop(), Some(samples));
@@ -113,7 +111,7 @@ mod tests {
 
     #[test]
     fn test_reordering() {
-        let mut jb = JitterBuffer::new(50, 48000, 2);
+        let mut jb = JitterBuffer::new(50, 48000);
         jb.push(1, vec![1.0; 256]);
         jb.push(0, vec![0.5; 256]);
         assert_eq!(jb.pop(), Some(vec![0.5; 256]));
@@ -122,7 +120,7 @@ mod tests {
 
     #[test]
     fn test_skip_late_packets() {
-        let mut jb = JitterBuffer::new(1, 48000, 2);
+        let mut jb = JitterBuffer::new(1, 48000);
         jb.push(0, vec![0.5; 256]);
         jb.push(2, vec![0.8; 256]);
         assert_eq!(jb.pop(), Some(vec![0.5; 256]));
@@ -133,7 +131,7 @@ mod tests {
 
     #[test]
     fn test_discard_old_duplicates() {
-        let mut jb = JitterBuffer::new(50, 48000, 2);
+        let mut jb = JitterBuffer::new(50, 48000);
         jb.push(0, vec![0.5; 256]);
         assert_eq!(jb.pop(), Some(vec![0.5; 256]));
         jb.push(0, vec![1.0; 256]);

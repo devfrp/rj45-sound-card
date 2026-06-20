@@ -1,16 +1,14 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum SampleFormat {
+    #[default]
     F32,
     I16,
     I24,
     I32,
 }
-
-impl SampleFormat {
-    pub fn from_u8(v: u8) -> Option<Self> {
         match v {
             0 => Some(Self::F32),
             1 => Some(Self::I16),
@@ -36,12 +34,6 @@ impl SampleFormat {
             Self::I24 => 3,
             Self::I32 => 4,
         }
-    }
-}
-
-impl Default for SampleFormat {
-    fn default() -> Self {
-        Self::F32
     }
 }
 
