@@ -1,12 +1,11 @@
 use std::collections::BTreeMap;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 pub struct JitterBuffer {
     packets: BTreeMap<u64, Vec<f32>>,
     max_latency: Duration,
     next_sequence: u64,
     sample_rate: u32,
-    last_output: Option<Instant>,
 }
 
 impl JitterBuffer {
@@ -16,7 +15,6 @@ impl JitterBuffer {
             max_latency: Duration::from_millis(max_latency_ms),
             next_sequence: 0,
             sample_rate,
-            last_output: None,
         }
     }
 
@@ -38,21 +36,10 @@ impl JitterBuffer {
     }
 
     pub fn pop(&mut self) -> Option<Vec<f32>> {
-        let now = Instant::now();
-
-        if let Some(last_out) = self.last_output {
-            let _frame_duration = Duration::from_secs_f64(1.0 / self.sample_rate as f64);
-            let expected_frames = (now - last_out).as_secs_f64() * self.sample_rate as f64;
-            if expected_frames < 0.5 {
-                return None;
-            }
-        }
-
         if let Some((&seq, _)) = self.packets.first_key_value() {
             if seq == self.next_sequence {
                 let samples = self.packets.remove(&seq).unwrap();
                 self.next_sequence = seq.wrapping_add(1);
-                self.last_output = Some(now);
                 return Some(samples);
             }
             if seq < self.next_sequence {
@@ -75,7 +62,6 @@ impl JitterBuffer {
                 );
                 let samples = self.packets.remove(&first_seq).unwrap();
                 self.next_sequence = first_seq.wrapping_add(1);
-                self.last_output = Some(now);
                 return Some(samples);
             }
         }
