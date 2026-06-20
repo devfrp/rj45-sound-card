@@ -301,7 +301,7 @@ mod tests {
     #[test]
     fn test_encrypted_packet_roundtrip() {
         let crypto = PacketCrypto::from_hex("deadbeef0102030405060708deadbeef0102030405060708").unwrap();
-        let header = AudioPacketHeader::new(1, 0, 2, 48000, SampleFormat::F32, 64);
+        let _header = AudioPacketHeader::new(1, 0, 2, 48000, SampleFormat::F32, 64);
         let samples = vec![0.5f32; 128];
 
         let raw = f32_slice_to_bytes(&samples, SampleFormat::F32);

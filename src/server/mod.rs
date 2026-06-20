@@ -14,7 +14,6 @@ use crate::audio::playback::AudioPlayback;
 use crate::config::Settings;
 use crate::net::audio_stream::{self, AudioPacketHeader};
 use crate::net::control::{self, ControlMessage, DeviceInfo};
-use crate::net::crypto::PacketCrypto;
 use crate::net::discovery;
 
 struct ClientStream {
@@ -313,7 +312,6 @@ pub async fn run(settings: Settings, stop_flag: Arc<AtomicBool>) -> Result<()> {
                                         ClientStream {
                                             stream_id: sid,
                                             sequence: 0,
-                                            addr: new_addr,
                                         },
                                     );
                                 }

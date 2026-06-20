@@ -43,7 +43,7 @@ impl JitterBuffer {
         let now = Instant::now();
 
         if let Some(last_out) = self.last_output {
-            let frame_duration = Duration::from_secs_f64(1.0 / self.sample_rate as f64);
+            let _frame_duration = Duration::from_secs_f64(1.0 / self.sample_rate as f64);
             let expected_frames = (now - last_out).as_secs_f64() * self.sample_rate as f64;
             if expected_frames < 0.5 {
                 return None;
