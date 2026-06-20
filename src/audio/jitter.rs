@@ -23,16 +23,6 @@ impl JitterBuffer {
             return;
         }
         self.packets.insert(sequence, samples);
-
-        let max_seq = self.next_sequence
-            + ((self.max_latency.as_secs_f64() * self.sample_rate as f64) as u64);
-        while self.packets.len() > 1 {
-            let last_key = *self.packets.last_key_value().unwrap().0;
-            if last_key <= max_seq {
-                break;
-            }
-            self.packets.pop_last();
-        }
     }
 
     pub fn pop(&mut self) -> Option<Vec<f32>> {
