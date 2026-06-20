@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use clap::{Parser, Subcommand};
 use anyhow::Result;
 
-use rj45_sound_card::{audio, client, config, net, server};
+use rj45_sound_card::{audio, client, config, server};
 #[cfg(feature = "gui")]
 use rj45_sound_card::gui;
 

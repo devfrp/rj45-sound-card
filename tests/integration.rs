@@ -1,10 +1,7 @@
 use rj45_sound_card::audio::format::{AudioFormat, SampleFormat};
 use rj45_sound_card::audio::jitter::JitterBuffer;
-use rj45_sound_card::config::{load, save_default, Settings};
-use rj45_sound_card::net::audio_stream::{AudioPacketHeader, parse_audio_packet, parse_audio_packet_decrypt};
-use rj45_sound_card::net::control::{
-    compute_auth_response, send_control, recv_control, ControlMessage,
-};
+use rj45_sound_card::net::audio_stream::{AudioPacketHeader, parse_audio_packet_decrypt};
+use rj45_sound_card::net::control::compute_auth_response;
 use rj45_sound_card::net::crypto::PacketCrypto;
 
 #[test]
@@ -75,7 +72,7 @@ fn test_header_all_formats() {
 #[test]
 fn test_encrypt_decrypt_packet() {
     let crypto = PacketCrypto::from_hex("deadbeef0102030405060708deadbeef0102030405060708").unwrap();
-    let header = AudioPacketHeader::new(1, 42, 2, 48000, SampleFormat::F32, 64);
+    let _header = AudioPacketHeader::new(1, 42, 2, 48000, SampleFormat::F32, 64);
     let samples = vec![0.5f32; 128];
 
     let parse_result = parse_audio_packet_decrypt(&[], Some(&crypto));
@@ -99,7 +96,7 @@ fn test_encrypt_decrypt_packet() {
 #[test]
 fn test_crypto_detects_tampering() {
     let crypto = PacketCrypto::from_hex("deadbeef0102030405060708deadbeef0102030405060708").unwrap();
-    let header = AudioPacketHeader::new(1, 0, 2, 48000, SampleFormat::F32, 64);
+    let _header = AudioPacketHeader::new(1, 0, 2, 48000, SampleFormat::F32, 64);
     let samples = vec![0.5f32; 128];
     let raw: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
 
