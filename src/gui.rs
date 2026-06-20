@@ -37,7 +37,6 @@ enum GuiCommand {
     ListDevices,
     SetVolume { channel: u16, volume: f32 },
     DiscoverServers,
-    Ping,
 }
 
 pub fn run_gui(settings: Settings, cli_server: Option<String>) -> Result<()> {
@@ -61,6 +60,7 @@ pub fn run_gui(settings: Settings, cli_server: Option<String>) -> Result<()> {
 }
 
 struct App {
+    #[allow(dead_code)]
     settings: Settings,
     mode: GuiMode,
     server_running: bool,
@@ -645,8 +645,8 @@ async fn list_audio_devices() -> Vec<DeviceInfo> {
             devices.push(DeviceInfo {
                 index: i,
                 name,
-                input_channels: input_configs as u16,
-                output_channels: output_configs as u16,
+                input_channels: input_configs,
+                output_channels: output_configs,
                 sample_rates,
             });
         }
