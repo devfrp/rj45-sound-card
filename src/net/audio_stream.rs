@@ -109,7 +109,7 @@ pub async fn send_raw_audio(
 ) -> Result<()> {
     let hdr_bytes = header.to_bytes();
 
-    let mut payload = if let Some(c) = crypto {
+    let payload = if let Some(c) = crypto {
         let mut combined = raw_audio.to_vec();
         let tag = c.encrypt(&mut combined, header.sequence);
         let mut pkt = Vec::with_capacity(hdr_bytes.len() + combined.len() + ENCRYPTED_AUTH_TAG_SIZE);

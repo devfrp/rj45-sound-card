@@ -1,4 +1,4 @@
-use std::hash::{Hash, Hasher};
+use std::hash::Hasher;
 
 #[derive(Debug, Clone)]
 pub struct PacketCrypto {

@@ -9,7 +9,7 @@ use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration};
 
 use crate::audio::capture::AudioCapture;
-use crate::audio::format::{AudioFormat, SampleFormat};
+use crate::audio::format::AudioFormat;
 use crate::audio::jitter::JitterBuffer;
 use crate::audio::playback::AudioPlayback;
 use crate::config::Settings;

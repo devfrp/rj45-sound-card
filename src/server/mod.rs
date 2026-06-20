@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -10,7 +10,6 @@ use tokio::io::BufReader;
 use tokio::sync::RwLock;
 
 use crate::audio::capture::AudioCapture;
-use crate::audio::format::SampleFormat;
 use crate::audio::playback::AudioPlayback;
 use crate::config::Settings;
 use crate::net::audio_stream::{self, AudioPacketHeader};
@@ -21,7 +20,6 @@ use crate::net::discovery;
 struct ClientStream {
     stream_id: u32,
     sequence: u64,
-    addr: SocketAddr,
 }
 
 pub async fn run(settings: Settings, stop_flag: Arc<AtomicBool>) -> Result<()> {
@@ -144,7 +142,6 @@ pub async fn run(settings: Settings, stop_flag: Arc<AtomicBool>) -> Result<()> {
                             .or_insert_with(|| ClientStream {
                                 stream_id: 0,
                                 sequence: 0,
-                                addr: *addr,
                             });
                         let seq = entry.sequence;
                         entry.sequence = entry.sequence.wrapping_add(1);
@@ -234,7 +231,6 @@ pub async fn run(settings: Settings, stop_flag: Arc<AtomicBool>) -> Result<()> {
         let sid_counter = next_stream_id.clone();
         let streams = client_streams.clone();
         let vols = volumes.clone();
-        let crypto_auth = crypto.clone();
         let enc_enabled = settings.encryption.enabled;
         let psk = settings.encryption.pre_shared_key.clone();
 
