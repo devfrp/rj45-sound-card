@@ -61,9 +61,9 @@ mod tests {
         let crypto = PacketCrypto::from_hex("deadbeef0102030405060708deadbeef0102030405060708").unwrap();
         let original = b"Hello, audio world!".to_vec();
         let mut data = original.clone();
-        let tag1 = crypto.encrypt(&mut data, 42);
+        let _tag1 = crypto.encrypt(&mut data, 42);
         assert_ne!(data, original);
-        let tag2 = crypto.decrypt(&mut data, 42);
+        let _tag2 = crypto.decrypt(&mut data, 42);
         assert_eq!(data, original);
     }
 

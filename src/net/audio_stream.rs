@@ -307,7 +307,7 @@ mod tests {
 
         let raw = f32_slice_to_bytes(&samples, SampleFormat::F32);
         let mut combined = raw.clone();
-        let tag = crypto.encrypt(&mut combined, 0);
+        let _tag = crypto.encrypt(&mut combined, 0);
         assert_ne!(combined, raw);
 
         crypto.decrypt(&mut combined, 0);
