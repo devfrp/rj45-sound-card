@@ -9,6 +9,9 @@ pub enum SampleFormat {
     I24,
     I32,
 }
+
+impl SampleFormat {
+    pub fn from_u8(v: u8) -> Option<Self> {
         match v {
             0 => Some(Self::F32),
             1 => Some(Self::I16),
